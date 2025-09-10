@@ -28,7 +28,7 @@ Hệ thống được xây dựng nhằm **hỗ trợ tra cứu và khai thác t
 
 ## 🛠️ Công nghệ sử dụng
 - Python (FastAPI, LangChain, OpenAI/Azure OpenAI)
-- Vector Database (FAISS / Pinecone / PostgreSQL + pgvector)
+- Vector Database (PostgreSQL + pgvector)
 - Frontend: HTML5, Bootstrap 5, JavaScript
 - Speech: Web Speech API, TTS API
 
