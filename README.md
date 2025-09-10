@@ -45,4 +45,4 @@ cd Agent-RAG
 pip install -r requirements.txt
 
 # Chạy server
-python backend/main.py
+python backend/main_azure.py
