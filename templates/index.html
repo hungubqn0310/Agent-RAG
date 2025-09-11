@@ -186,7 +186,274 @@
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
     <script>
-        // (giữ nguyên JavaScript cũ của bạn)
+        let recognition = null;
+        let isRecording = false;
+
+        // Initialize when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            initializeFileUpload();
+            loadFileList();
+        });
+
+        // File upload initialization
+        function initializeFileUpload() {
+            const fileUploadArea = document.getElementById('fileUploadArea');
+            const fileInput = document.getElementById('fileInput');
+
+            // Click to select files
+            fileUploadArea.addEventListener('click', () => {
+                console.log('File upload area clicked');
+                fileInput.click();
+            });
+
+            // File input change
+            fileInput.addEventListener('change', function(e) {
+                console.log('File input changed:', e.target.files);
+                handleFiles(e.target.files);
+            });
+
+            // Drag and drop
+            fileUploadArea.addEventListener('dragover', handleDragOver);
+            fileUploadArea.addEventListener('dragleave', handleDragLeave);
+            fileUploadArea.addEventListener('drop', handleDrop);
+        }
+
+        function handleDragOver(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            document.getElementById('fileUploadArea').classList.add('dragover');
+        }
+
+        function handleDragLeave(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            document.getElementById('fileUploadArea').classList.remove('dragover');
+        }
+
+        function handleDrop(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            document.getElementById('fileUploadArea').classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            console.log('Files dropped:', files);
+            handleFiles(files);
+        }
+
+        async function handleFiles(files) {
+            console.log('Handling files:', files);
+            for (let file of files) {
+                await uploadFile(file);
+            }
+        }
+
+        async function uploadFile(file) {
+            console.log('Uploading file:', file.name);
+            const formData = new FormData();
+            formData.append('file', file);
+
+            // Show progress
+            document.getElementById('uploadProgress').classList.remove('loading');
+
+            try {
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+                console.log('Upload response:', result);
+
+                if (response.ok) {
+                    addMessage(`File "${file.name}" đã được upload và xử lý thành công! (${result.chunks_processed} chunks)`, 'bot');
+                    loadFileList();
+                } else {
+                    addMessage(`Lỗi upload file: ${result.detail}`, 'bot');
+                }
+            } catch (error) {
+                console.error('Upload error:', error);
+                addMessage(`Lỗi upload file: ${error.message}`, 'bot');
+            } finally {
+                document.getElementById('uploadProgress').classList.add('loading');
+            }
+        }
+
+        async function loadFileList() {
+            try {
+                const response = await fetch('/files');
+                const data = await response.json();
+                
+                const fileList = document.getElementById('fileList');
+                fileList.innerHTML = '';
+
+                if (data.files && data.files.length > 0) {
+                    data.files.forEach(file => {
+                        const fileItem = document.createElement('div');
+                        fileItem.className = 'list-group-item d-flex justify-content-between align-items-center';
+                        fileItem.innerHTML = `
+                            <span><i class="fas fa-file"></i> ${file.filename}</span>
+                            <button class="btn btn-sm btn-outline-danger" onclick="deleteFile('${file.filename}')">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        `;
+                        fileList.appendChild(fileItem);
+                    });
+                } else {
+                    fileList.innerHTML = '<div class="text-muted small">Chưa có file nào được upload</div>';
+                }
+            } catch (error) {
+                console.error('Error loading file list:', error);
+            }
+        }
+
+        async function deleteFile(filename) {
+            try {
+                const response = await fetch(`/files/${filename}`, {
+                    method: 'DELETE'
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    addMessage(`File "${filename}" đã được xóa thành công!`, 'bot');
+                    loadFileList();
+                } else {
+                    addMessage(`Lỗi xóa file: ${result.detail}`, 'bot');
+                }
+            } catch (error) {
+                addMessage(`Lỗi xóa file: ${error.message}`, 'bot');
+            }
+        }
+
+        // Voice recognition
+        function toggleVoiceInput() {
+            if (!('webkitSpeechRecognition' in window)) {
+                addMessage('Trình duyệt không hỗ trợ nhận diện giọng nói', 'bot');
+                return;
+            }
+
+            if (!recognition) {
+                recognition = new webkitSpeechRecognition();
+                recognition.continuous = false;
+                recognition.interimResults = false;
+                recognition.lang = 'vi-VN';
+
+                recognition.onresult = function(event) {
+                    const transcript = event.results[0][0].transcript;
+                    document.getElementById('messageInput').value = transcript;
+                };
+
+                recognition.onerror = function(event) {
+                    console.error('Speech recognition error:', event.error);
+                    isRecording = false;
+                    updateVoiceButton();
+                };
+
+                recognition.onend = function() {
+                    isRecording = false;
+                    updateVoiceButton();
+                };
+            }
+
+            if (isRecording) {
+                recognition.stop();
+            } else {
+                recognition.start();
+                isRecording = true;
+                updateVoiceButton();
+            }
+        }
+
+        function updateVoiceButton() {
+            const voiceBtn = document.getElementById('voiceBtn');
+            
+            if (isRecording) {
+                voiceBtn.classList.add('recording');
+                voiceBtn.innerHTML = '<i class="fas fa-stop"></i>';
+            } else {
+                voiceBtn.classList.remove('recording');
+                voiceBtn.innerHTML = '<i class="fas fa-microphone"></i>';
+            }
+        }
+
+        // Chat functions
+        function handleKeyPress(event) {
+            if (event.key === 'Enter') {
+                sendMessage();
+            }
+        }
+
+        async function sendMessage() {
+            const messageInput = document.getElementById('messageInput');
+            const message = messageInput.value.trim();
+            
+            if (!message) return;
+
+            addMessage(message, 'user');
+            messageInput.value = '';
+
+            // Show loading
+            document.getElementById('loadingIndicator').classList.remove('loading');
+
+            try {
+                const externalSearch = document.getElementById('externalSearch').checked;
+                const response = await fetch('/search', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        query: message,
+                        include_external: externalSearch
+                    })
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    addMessage(result.response, 'bot', result.citations);
+                } else {
+                    addMessage(`Lỗi: ${result.detail}`, 'bot');
+                }
+            } catch (error) {
+                addMessage(`Lỗi kết nối: ${error.message}`, 'bot');
+            } finally {
+                document.getElementById('loadingIndicator').classList.add('loading');
+            }
+        }
+
+        function addMessage(text, sender, citations = []) {
+            const chatContainer = document.getElementById('chatContainer');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${sender}-message`;
+
+            let header = `<strong><i class="fas fa-${sender === 'user' ? 'user' : 'robot'}"></i> ${sender === 'user' ? 'Bạn' : 'AI Assistant'}:</strong>`;
+            let bodyHtml = sender === 'bot' ? renderMarkdown(text) : `<p>${text}</p>`;
+
+            let messageContent = `${header}<div class="mt-1">${bodyHtml}</div>`;
+
+            // Add citations if available
+            if (sender === 'bot' && citations && citations.length > 0 && !/Nguồn tham khảo/i.test(text)) {
+                messageContent += '<div class="citations mt-2"><strong>Nguồn tham khảo:</strong><ul>';
+                citations.forEach((citation) => {
+                    if (citation.source === 'external') {
+                        messageContent += `<li><a href="${citation.link}" target="_blank">${citation.document}</a></li>`;
+                    } else {
+                        const pct = citation.similarity != null ? ` (Độ tương đồng: ${(citation.similarity * 100).toFixed(1)}%)` : '';
+                        messageContent += `<li>${citation.document} — Trang ${citation.page_number || 1}${pct}</li>`;
+                    }
+                });
+                messageContent += '</ul></div>';
+            }
+
+            messageDiv.innerHTML = messageContent;
+            chatContainer.appendChild(messageDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        function renderMarkdown(mdText) {
+            const html = marked.parse(mdText || '');
+            return DOMPurify.sanitize(html);
+        }
     </script>
 </body>
 </html>
