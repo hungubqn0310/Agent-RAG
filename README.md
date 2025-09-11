@@ -5,7 +5,7 @@ Hệ thống được xây dựng nhằm **hỗ trợ tra cứu và khai thác t
 - 📄 **PDF**
 - 📝 **Word**
 - 📊 **Excel**
-- 🖼️ **Hình ảnh quét**
+- 🖼️ **Image**
 
 ---
 
