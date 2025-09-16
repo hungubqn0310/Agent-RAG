@@ -448,8 +448,51 @@
             messageDiv.innerHTML = messageContent;
             chatContainer.appendChild(messageDiv);
             chatContainer.scrollTop = chatContainer.scrollHeight;
+            
+            // THÊM 3 DÒNG NÀY
+            if (sender === 'bot') {
+                speakText(text);
+            }
         }
 
+
+        // Text-to-Speech function
+        async function speakText(text) {
+            const ttsEnabled = document.getElementById('ttsEnabled').checked;
+            if (!ttsEnabled) return;
+            
+            try {
+                const response = await fetch('/voice/text-to-speech', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        text: text,
+                        language: 'vi'
+                    })
+                });
+                
+                const result = await response.json();
+                if (result.success && result.audio_data) {
+                    // Convert hex string back to audio data
+                    const audioBytes = new Uint8Array(result.audio_data.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
+                    const audioBlob = new Blob([audioBytes], { type: 'audio/wav' });
+                    const audioUrl = URL.createObjectURL(audioBlob);
+                    
+                    const audio = new Audio(audioUrl);
+                    audio.play().then(() => {
+                        // Clean up URL after playing
+                        audio.onended = () => URL.revokeObjectURL(audioUrl);
+                    }).catch(error => {
+                        console.error('Error playing audio:', error);
+                        URL.revokeObjectURL(audioUrl);
+                    });
+                }
+            } catch (error) {
+                console.error('Error with text-to-speech:', error);
+            }
+        }
         function renderMarkdown(mdText) {
             const html = marked.parse(mdText || '');
             return DOMPurify.sanitize(html);

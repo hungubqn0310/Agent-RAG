@@ -62,7 +62,7 @@ class AISearchService:
             print(f"Error creating query embedding: {e}")
             return np.zeros(1536)
     
-    async def search_documents(self, query: str, limit: int = 5, threshold: float = 0.0) -> List[Dict[str, Any]]:
+    async def search_documents(self, query: str, limit: int = 5, threshold: float = 0) -> List[Dict[str, Any]]:
         """Search for relevant documents using vector similarity"""
         try:
             # Create query embedding
@@ -282,13 +282,17 @@ class AISearchService:
         # Search internal documents first
         document_results = await self.search_documents(query)
         
-        # Only search Google if NO internal results found
+        # Search Google if no relevant internal results (similarity < 0.3)
         external_results = []
-        if include_external and self.google_api_key and not document_results:
-            print("No internal results found, searching Google...")
+        has_relevant_results = any(result.get('similarity', 0) >= 0 for result in document_results)
+        
+        if include_external and self.google_api_key and not has_relevant_results:
+            print("No relevant internal results found (similarity < 0.3), searching Google...")
             external_results = self.search_external_sources(query)
-        elif document_results:
-            print(f"Found {len(document_results)} internal results, using only internal data")
+        elif has_relevant_results:
+            print(f"Found {len(document_results)} relevant internal results, using only internal data")
+        else:
+            print(f"Found {len(document_results)} internal results but none are relevant (similarity < 0.3)")
         
         # Generate response with available results
         response = self.generate_response(query, document_results, external_results)
