@@ -14,6 +14,8 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 import datetime
 import shutil
 from services.azure_document_intelligence import AzureDocumentIntelligenceService
+import ocrmypdf
+from pypdf import PdfReader
 
 class DocumentProcessor:
     def __init__(self):
@@ -42,6 +44,54 @@ class DocumentProcessor:
         except Exception:
             pass
     
+    def _pdf_has_text(self, pdf_path: str) -> bool:
+        """Kiểm tra PDF có text layer không"""
+        try:
+            reader = PdfReader(pdf_path)
+            for page in reader.pages:
+                text = page.extract_text()
+                if text and text.strip():
+                    return True
+            return False
+        except Exception:
+            return False
+        
+    def _ocr_pdf_if_needed(self, pdf_path: str) -> str:
+        if self._pdf_has_text(pdf_path):
+            print(f"Bỏ qua OCR (đã có text): {pdf_path}")
+            return pdf_path
+
+        tmp_path = pdf_path.replace(".pdf", "_ocr.pdf")
+        try:
+            print(f"[DEBUG] Bắt đầu OCR cho {pdf_path}")
+            ocrmypdf.ocr(
+                input_file=pdf_path,
+                output_file=tmp_path,
+                language="vie",
+                deskew=True,
+                force_ocr=True,
+                jobs=4
+            )
+            print(f"[DEBUG] OCR hoàn tất, file tạm: {tmp_path}")
+
+            # Kiểm tra file tạm có tồn tại và đọc được không
+            if not os.path.exists(tmp_path):
+                print(f"[ERROR] File OCR {tmp_path} không tồn tại")
+                return pdf_path
+
+            # Kiểm tra text sau OCR
+            if self._pdf_has_text(tmp_path):
+                print(f"[DEBUG] Text layer tìm thấy trong {tmp_path}")
+                shutil.move(tmp_path, pdf_path)
+                print(f"OCR thành công, cập nhật file: {pdf_path}")
+            else:
+                print(f"[ERROR] OCR xong nhưng không có text layer: {tmp_path}")
+                return tmp_path
+        except Exception as e:
+            print(f"[ERROR] OCR thất bại cho {pdf_path}: {str(e)}")
+            return pdf_path
+        return pdf_path
+
     def _preprocess_text(self, text: str) -> str:
         """Preprocess text for better quality"""
         import re
@@ -52,68 +102,79 @@ class DocumentProcessor:
         return text
     
     def process_document(self, file_path: str) -> List[Dict[str, Any]]:
-        """Process document and return chunks with embeddings"""
         try:
-            # Extract text
-            text = self.extract_text_from_file(file_path)
-            if not text:
-                return []
-            
-            # Preprocess text
-            processed_content = self._preprocess_text(text)
-            
-            # Split into chunks
-            chunks = self.text_splitter.split_text(processed_content)
-            total_chunks = len(chunks)
-            
-            # Process in batches
+            if file_path.lower().endswith(".pdf"):
+                file_path = self._ocr_pdf_if_needed(file_path)
+                pages = self.extract_text_from_pdf(file_path)
+            else:
+                pages = [(1, self.extract_text_from_file(file_path))]
+
             all_chunks = []
-            for i in range(0, len(chunks), self.batch_size):
-                batch_chunks = chunks[i:i + self.batch_size]
-                
-                # Get embeddings for batch
-                embeddings = self.azure_openai.create_embeddings_batch(batch_chunks)
-                
-                # Create chunk data
-                for idx, (chunk, embedding) in enumerate(zip(batch_chunks, embeddings)):
+            total_chunks = 0
+
+            for page_number, text in pages:
+                processed_content = self._preprocess_text(text)
+                if not processed_content.strip():
+                    continue 
+
+                chunks = self.text_splitter.split_text(processed_content)
+                for chunk in chunks:
+                    total_chunks += 1
+                    embedding = self.azure_openai.create_embedding(chunk)
                     chunk_data = {
                         'title': os.path.splitext(os.path.basename(file_path))[0],
                         'content': chunk,
-                        'file_path': f"{file_path}#chunk{i+idx}",
+                        'file_path': f"{file_path}#chunk{total_chunks}",
                         'embedding': embedding,
-                        'chunk_index': i + idx,
-                        'total_chunks': total_chunks,
+                        'chunk_index': total_chunks,
+                        'total_chunks': None,
                         'doc_metadata': {
                             'chunk_size': len(chunk),
                             'import_timestamp': datetime.datetime.now().isoformat(),
                             'original_file': os.path.basename(file_path),
-                            'original_path': file_path
+                            'original_path': file_path,
+                            'page_number': page_number
                         }
                     }
                     all_chunks.append(chunk_data)
-            
+
+            # update total_chunks
+            for item in all_chunks:
+                item['total_chunks'] = total_chunks
+
             return all_chunks
-            
         except Exception as e:
             print(f"Error processing document: {e}")
             return []
-    
-    def extract_text_from_pdf(self, file_path: str) -> str:
-        """Extract text from PDF file"""
+
+
+    def extract_text_from_pdf(self, file_path: str) -> List[Tuple[int, str]]:
+        pages_text = []
         try:
-            # Prefer Document Intelligence if enabled; do not fallback to others when enabled
             if self.use_docint and self.docint.available:
                 text = self.docint.extract_text(file_path)
-                return text or ""
-            with open(file_path, 'rb') as file:
-                pdf_reader = PyPDF2.PdfReader(file)
-                text = ""
-                for page in pdf_reader.pages:
-                    text += page.extract_text() + "\n"
-                return text
+                if text and text.strip():
+                    pages_text.append((1, text))
+                    print(f"[DEBUG] Azure DocInt extracted text: {len(text)} chars")
+                else:
+                    print(f"[WARN] Azure DocInt không trích xuất được text từ {file_path}")
+                return pages_text
+
+            reader = PdfReader(file_path)
+            for page_num, page in enumerate(reader.pages, start=1):
+                text = page.extract_text() or ""
+                print(f"[DEBUG] Page {page_num}: {len(text)} chars")
+                if text.strip():
+                    pages_text.append((page_num, text))
+                else:
+                    print(f"[WARN] Page {page_num} không có text")
+
+            if not pages_text:
+                print(f"[ERROR] Không trích xuất được text từ {file_path}")
+            return pages_text
         except Exception as e:
-            print(f"Error extracting PDF: {e}")
-            return ""
+            print(f"[ERROR] Lỗi khi trích xuất PDF {file_path}: {str(e)}")
+            return []
     
     def extract_text_from_docx(self, file_path: str) -> str:
         """Extract text from DOCX file including paragraphs and tables"""

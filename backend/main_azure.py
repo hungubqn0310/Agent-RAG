@@ -64,6 +64,7 @@ class SearchResponse(BaseModel):
     citations: List[dict]
     sources_count: int
     external_sources_count: int
+    raw_contents: Optional[List[str]] = []
 
 class UploadResponse(BaseModel):
     message: str
