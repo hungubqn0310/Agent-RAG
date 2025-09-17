@@ -147,13 +147,14 @@ class AISearchService:
             
             # Fallback: remove chunk information from file_path
             file_path = result.get('file_path', '')
-            if '#chunk' in file_path:
+            if file_path and '#chunk' in file_path:
                 return file_path.split('#chunk')[0]
             
-            return file_path
+            return file_path or ""
         except Exception as e:
             print(f"Error getting original file path: {e}")
-            return result.get('file_path', '')
+            return ""
+
     
     def get_document_title(self, result: Dict[str, Any]) -> str:
         """Get proper document title, preferring original filename"""
@@ -181,7 +182,8 @@ class AISearchService:
                     'response': simple_response,
                     'citations': [],
                     'sources_count': 0,
-                    'external_sources_count': 0
+                    'external_sources_count': 0,
+                    'raw_contents': [r['content'] for r in document_results]
                 }
             
             # Prepare context from document results
@@ -192,19 +194,23 @@ class AISearchService:
             if document_results:
                 context += "Thông tin từ tài liệu nội bộ:\n"
                 for i, result in enumerate(document_results, 1):
-                    context += f"Tài liệu {i}: {result['content']}\n"
-                    
-                    # Get proper file path and title
                     original_file_path = self.get_original_file_path(result)
                     document_title = self.get_document_title(result)
+                    page_number = result['doc_metadata'].get('page_number', 1)
                     
+                    file_name = os.path.basename(original_file_path) if original_file_path else "unknown"
+                    context += (
+                        f"[Tài liệu {i}: {document_title} — {file_name}"
+                        f" — Trang {page_number}]\n{result['content']}\n\n"
+                    )
+
                     citations.append({
                         'document': document_title,
-                        'file_path': original_file_path,
-                        'page_number': result['doc_metadata'].get('page_number', 1),
+                        'file_path': original_file_path or "",
+                        'page_number': page_number,
                         'source': 'internal'
                     })
-            
+
             # Add external results if available
             if external_results:
                 if document_results:
@@ -261,7 +267,8 @@ class AISearchService:
                 'response': final_text,
                 'citations': citations,
                 'sources_count': len(document_results),
-                'external_sources_count': len(external_results) if external_results else 0
+                'external_sources_count': len(external_results) if external_results else 0,
+                'raw_contents': [r['content'] for r in document_results]
             }
             
         except Exception as e:

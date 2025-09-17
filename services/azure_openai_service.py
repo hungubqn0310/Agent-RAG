@@ -137,12 +137,23 @@ class AzureOpenAIService:
             },
             {
                 "role": "user", 
-                "content": f"Câu hỏi: {query}\n\nTài liệu tham khảo:\n{context}"
+                "content": f"""
+    Câu hỏi: {query}
+
+    Tài liệu tham khảo (có kèm nguồn: tên file + số trang/sheet):
+    {context}
+
+    Yêu cầu:
+    - Chỉ trả lời dựa trên tài liệu ở trên.
+    - Khi trích dẫn, phải ghi rõ nguồn theo định dạng:
+    "Nguồn: {{file_name}} — Trang {{page_number}}"
+    - Nếu không tìm thấy thông tin, hãy nói rõ là không có.
+    """
             }
         ]
         
         return self.generate_chat_completion(messages)
-    
+
     def generate_greeting_response(self, query: str) -> str:
         """Generate greeting response"""
         messages = [
