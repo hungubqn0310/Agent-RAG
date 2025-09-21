@@ -171,7 +171,7 @@ class AISearchService:
             return result.get('title', 'Unknown Document')
     
     def generate_response(self, query: str, document_results: List[Dict[str, Any]], 
-                         external_results: List[Dict[str, Any]] = None) -> Dict[str, Any]:
+                     external_results: List[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Generate AI response based on search results using Azure OpenAI"""
         try:
             # Check if this is a simple greeting
@@ -230,8 +230,86 @@ class AISearchService:
             if document_results or external_results:
                 ai_response = self.azure_openai.generate_response(query, context)
                 
-                # Only add reference section if there are citations
-                if citations:
+                # Enhanced check for no relevant information
+                no_info_indicators = [
+                    "không tìm thấy thông tin",
+                    "không có thông tin",
+                    "không rõ ràng",
+                    "không có nội dung cụ thể",
+                    "không có thông tin liên quan",
+                    "không thể trả lời",
+                    "không có dữ liệu",
+                    "không có trong các tài liệu",
+                    "không có trong tài liệu",
+                    "không có trong",
+                    "không có",
+                    "không tìm thấy",
+                    "không tìm được",
+                    "không có sẵn",
+                    "không có sẵn trong",
+                    "không có thông tin về",
+                    "không có thông tin liên quan đến",
+                    "không có dữ liệu về",
+                    "không có dữ liệu liên quan đến",
+                    "không có nội dung về",
+                    "không có nội dung liên quan đến",
+                    "không có thông tin cụ thể",
+                    "không có thông tin chi tiết",
+                    "không có thông tin rõ ràng",
+                    "không có thông tin chính xác",
+                    "không có thông tin đầy đủ",
+                    "không có thông tin phù hợp",
+                    "không có thông tin hữu ích",
+                    "không có thông tin cần thiết",
+                    "không có thông tin mong muốn",
+                    "không có thông tin yêu cầu",
+                    "không có thông tin được yêu cầu",
+                    "không có thông tin được hỏi",
+                    "không có thông tin được tìm kiếm",
+                    "không có thông tin được tra cứu",
+                    "không có thông tin được cung cấp",
+                    "không có thông tin được đề cập",
+                    "không có thông tin được nói đến",
+                    "không có thông tin được nhắc đến",
+                    "không có thông tin được bàn đến",
+                    "không có thông tin được thảo luận",
+                    "không có thông tin được phân tích",
+                    "không có thông tin được giải thích",
+                    "không có thông tin được mô tả",
+                    "không có thông tin được trình bày",
+                    "không có thông tin được giới thiệu",
+                    "không có thông tin được đề xuất",
+                    "không có thông tin được khuyến nghị",
+                    "không có thông tin được gợi ý",
+                    "không có thông tin được đề cập đến",
+                    "không có thông tin được nói đến",
+                    "không có thông tin được nhắc đến",
+                    "không có thông tin được bàn đến",
+                    "không có thông tin được thảo luận",
+                    "không có thông tin được phân tích",
+                    "không có thông tin được giải thích",
+                    "không có thông tin được mô tả",
+                    "không có thông tin được trình bày",
+                    "không có thông tin được giới thiệu",
+                    "không có thông tin được đề xuất",
+                    "không có thông tin được khuyến nghị",
+                    "không có thông tin được gợi ý"
+                ]
+                
+                # Check if response indicates no relevant information
+                response_lower = ai_response.lower()
+                has_no_info = any(indicator in response_lower for indicator in no_info_indicators)
+                
+                # Additional check: if response is very short and contains "không có"
+                if len(ai_response.strip()) < 200 and "không có" in response_lower:
+                    has_no_info = True
+                
+                # Additional check: if response contains "không có" and "tài liệu"
+                if "không có" in response_lower and "tài liệu" in response_lower:
+                    has_no_info = True
+                
+                # Only add reference section if there are citations AND AI found relevant info
+                if citations and not has_no_info:
                     formatted_answer = [ai_response.strip()]
                     formatted_answer.append("\n### Nguồn tham khảo")
                     
@@ -256,16 +334,17 @@ class AISearchService:
                     
                     final_text = "\n\n".join(formatted_answer)
                 else:
+                    # No relevant info found, don't show citations
                     final_text = ai_response.strip()
             else:
-                # No results found - this should not happen with the new logic
+                # No results found
                 final_text = ("Không tìm thấy thông tin phù hợp trong tài liệu đã cung cấp và không thể tìm kiếm bên ngoài. "
-                             "Bạn có thể thử: đặt câu hỏi cụ thể hơn, kiểm tra lại từ khóa có dấu/không dấu, "
-                             "hoặc tải thêm tài liệu liên quan.")
+                            "Bạn có thể thử: đặt câu hỏi cụ thể hơn, kiểm tra lại từ khóa có dấu/không dấu, "
+                            "hoặc tải thêm tài liệu liên quan.")
             
             return {
                 'response': final_text,
-                'citations': citations,
+                'citations': citations if not has_no_info else [],  # Empty citations if no relevant info
                 'sources_count': len(document_results),
                 'external_sources_count': len(external_results) if external_results else 0,
                 'raw_contents': [r['content'] for r in document_results]

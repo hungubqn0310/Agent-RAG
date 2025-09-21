@@ -179,9 +179,7 @@ class DocumentProcessor:
     def extract_text_from_docx(self, file_path: str) -> str:
         """Extract text from DOCX file including paragraphs and tables"""
         try:
-            if self.use_docint and self.docint.available:
-                text = self.docint.extract_text(file_path)
-                return text or ""
+            # File Word không cần Document Intelligence, xử lý trực tiếp
             doc = DocxDocument(file_path)
             parts = []
             # Paragraphs
@@ -219,18 +217,52 @@ class DocumentProcessor:
                 return ""
     
     def extract_text_from_excel(self, file_path: str) -> str:
-        """Extract text from Excel file"""
+        """Extract text from Excel file - handles all sheets"""
         try:
-            # Document Intelligence can parse tables; when enabled, don't fallback
-            if self.use_docint and self.docint.available:
-                text = self.docint.extract_text(file_path)
-                return text or ""
-            df = pd.read_excel(file_path)
-            text = ""
-            for column in df.columns:
-                text += f"{column}: "
-                text += " ".join([str(cell) for cell in df[column].dropna()]) + "\n"
-            return text
+            # Excel không cần Document Intelligence, xử lý trực tiếp bằng pandas
+            print(f"[DEBUG] Processing Excel file with pandas: {file_path}")
+            excel_file = pd.ExcelFile(file_path)
+            all_text = []
+            
+            for sheet_name in excel_file.sheet_names:
+                try:
+                    print(f"[DEBUG] Processing sheet: {sheet_name}")
+                    df = pd.read_excel(file_path, sheet_name=sheet_name)
+                    if df.empty:
+                        print(f"[DEBUG] Sheet {sheet_name} is empty, skipping")
+                        continue
+                        
+                    sheet_text = f"Sheet: {sheet_name}\n"
+                    
+                    # Add column headers
+                    if not df.columns.empty:
+                        sheet_text += "Headers: " + ", ".join([str(col) for col in df.columns]) + "\n"
+                    
+                    # Add data rows (limit to first 100 rows to avoid too large chunks)
+                    row_count = 0
+                    for index, row in df.iterrows():
+                        if row_count >= 500:  # Limit rows to prevent too large chunks
+                            sheet_text += f"... (showing first 100 rows, total {len(df)} rows)\n"
+                            break
+                            
+                        row_data = []
+                        for col in df.columns:
+                            cell_value = row[col]
+                            if pd.notna(cell_value) and str(cell_value).strip():
+                                row_data.append(f"{col}: {str(cell_value).strip()}")
+                        if row_data:
+                            sheet_text += " | ".join(row_data) + "\n"
+                        row_count += 1
+                    
+                    all_text.append(sheet_text)
+                    print(f"[DEBUG] Sheet {sheet_name} processed: {len(sheet_text)} chars")
+                except Exception as sheet_error:
+                    print(f"Error processing sheet {sheet_name}: {sheet_error}")
+                    continue
+            
+            result = "\n\n".join(all_text)
+            print(f"[DEBUG] Excel processing complete: {len(result)} total chars")
+            return result
         except Exception as e:
             print(f"Error extracting Excel: {e}")
             return ""
@@ -251,7 +283,16 @@ class DocumentProcessor:
         file_ext = os.path.splitext(file_path)[1].lower()
         
         if file_ext == '.pdf':
-            return self.extract_text_from_pdf(file_path)
+            # PDF returns List[Tuple[int, str]], combine all pages into single string
+            pages = self.extract_text_from_pdf(file_path)
+            if not pages:
+                return ""
+            # Combine all pages into single text
+            all_text = []
+            for page_num, text in pages:
+                if text.strip():
+                    all_text.append(text.strip())
+            return "\n\n".join(all_text)
         elif file_ext in ['.docx', '.doc']:
             return self.extract_text_from_docx(file_path)
         elif file_ext in ['.xlsx', '.xls']:
